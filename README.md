@@ -76,9 +76,9 @@ the previous checkpoint. Earlier k-mer and variant checkpoints are incompatible;
 
 - `job.py`: federated recipe, per-client settings, timing, and checkpoint export.
 - `client.py`: full-sequence datasets, local training, evaluation, and timings.
-- `data.py`: Gen sample selection, validation, and FASTA/GFA readers.
+- `data.py`: Gen sample selection, validation, and FASTA reader.
 - `model.py`: shared CNN, full-sequence encoding, and device helpers.
-- `predict.py`: score FASTA or GFA sequences with the saved CNN.
+- `predict.py`: score FASTA sequences with the saved CNN.
 - `benchmark_full_sequences.py`: local timing using the same model.
 - `organization-a/`, `organization-b/`: local Gen repositories and source data.
 - `models/global_model.pt`: generated federated CNN checkpoint.
