@@ -43,9 +43,9 @@ def load_model(path=DEFAULT_MODEL_PATH):
     spec = checkpoint.get("model_spec")
     if not isinstance(spec, dict) or spec.get("version") != MODEL_VERSION:
         raise ValueError("Checkpoint is not a current full-sequence CNN; retrain with job.py")
-    if spec != model_spec(spec.get("channels"), spec.get("chunk_size")):
+    if spec != model_spec(spec.get("channels"), spec.get("chunk_size"), spec.get("regions")):
         raise ValueError("Unsupported model configuration")
-    model = create_model(spec["channels"], spec["chunk_size"])
+    model = create_model(spec["channels"], spec["chunk_size"], spec["regions"])
     model.load_state_dict(checkpoint["model"])
     model.eval()
     return model

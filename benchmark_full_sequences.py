@@ -60,7 +60,7 @@ def main():
     optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
     print(f"device={device}, torch={torch.__version__}, CPU threads={threads}, batch_size=1", flush=True)
     print(
-        f"channels={model.output.in_features}, chunk_size={model.chunk_size}, "
+        f"channels={model.encoder[0].out_channels}, regions={model.regions}, chunk_size={model.chunk_size}, "
         f"parameters={sum(p.numel() for p in model.parameters())}",
         flush=True,
     )

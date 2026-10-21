@@ -46,17 +46,26 @@ the held-out split. Each selected sample must have exactly one graph and one seq
 client accepts `--score_key` to use another metadata field.
 
 Every A/C/G/T base is encoded and used. Training generates no GFA files, alignments, reference-relative variants, or
-k-mer vectors. The CNN has two stride-one convolutional layers (kernel sizes 9 and 5, default 8 channels), LeakyReLU
-activations, global average pooling, and a regression output. There is one loss and one optimizer step per complete
+k-mer vectors. The CNN has 10 channels, a first convolution with a 100-base kernel and stride 100, and a second convolution with
+kernel size 5 and stride 1. LeakyReLU activations are followed by average pooling within 100 ordered regions and
+a regression output. There is one loss and one optimizer step per complete
 genome, with batch size 1.
 
 Overlapping chunks preserve convolution context at their boundaries. Activation checkpointing recomputes chunk
 activations during backward to bound memory; chunk outputs are combined before computing the genome's score. The
-chunk size is 65,536 bases, with eight channels and one local training epoch per round.
+chunk size is 65,536 bases (rounded down to 655 whole windows), with 10 channels and one local training epoch per round.
+The first convolution processes nonoverlapping 100-base windows; an incomplete final window is zero-padded. The second
+convolution combines five neighboring windows, giving a 500-base receptive field and a total stride of 100 bases.
+Chunks include two context windows on either side and always align to the same genome-wide window grid.
 
-The default model has 633 parameters. Its cost includes processing every base, even though its checkpoint is small. This
-is an example CNN: global pooling loses absolute positions and the model has a short local receptive field.  Timing
-measures this architecture, not a large genomic transformer.
+The output feature positions are divided into 100 consecutive regions of approximately equal length. Each region contributes 10 average
+features, giving the output layer 1,000 inputs. This preserves coarse relative position: the same pattern can have a
+different effect in different regions. Context crosses region boundaries, and every output position contributes to exactly one
+regional average. When there are fewer output positions than regions, empty regions contribute zeros. For a
+4,641,652-base genome there are 46,417 output positions, so each region pools 464 or 465 positions.
+
+The default model has 5,521 parameters. It still has a short local receptive field and discards positions within each
+region. More features or regions do not guarantee fitting random scores or improving held-out accuracy.
 
 Clients report mean squared error (MSE) on the incoming global model, then train locally and send parameters for FedAvg
 aggregation. Lower MSE is better. A final evaluation measures the aggregated model on each client's held-out genomes.
@@ -68,13 +77,25 @@ saved models predict in original score units. LeakyReLU keeps gradients flowing 
 
 Evaluation logs include a baseline MSE from always predicting that client's training-score mean. Positive
 `improvement` means the model beats this baseline on held-out data. The online training MSE summarizes predictions
-made during updates, rather than a separate evaluation of the final model.
+made during updates. A separate training evaluation after each local round reports MSE with fixed weights, the
+training-mean baseline MSE, and prediction standard deviation and range. The final aggregated model is also evaluated
+on each client's training samples, so you can distinguish local fitting from the result of aggregation. These passes
+add evaluation time but do not update weights or change the training shuffle order. A narrow prediction range and
+training MSE close to the baseline indicate that the model is mostly predicting a constant.
+
+To compare with the earlier 100-region experiment, retrain with:
+
+```bash
+python job.py --num_rounds 10
+```
+
+New runs use 100 regions; loading an existing v4 checkpoint uses its recorded region count.
 
 ## Prediction
 
 A successful run saves `models/global_model.pt`, including the CNN weights and architecture configuration. It replaces
-the previous checkpoint. Earlier checkpoints, including the ReLU CNN (v1), are incompatible; rerun `job.py` to produce
-a LeakyReLU CNN (v2) model. This change prevents silently interpreting old weights with the new activation function.
+the previous checkpoint. Earlier checkpoints (v1/v2/v3) are incompatible; rerun `job.py` to
+produce a strided regional-pooling CNN (v4) model. The checkpoint records the channel and region counts used for prediction.
 
 
 ## Files

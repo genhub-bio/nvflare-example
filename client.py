@@ -58,6 +58,38 @@ def training_score_stats(rows):
     return mean, scale if scale > 1e-6 else 1.0
 
 
+def evaluate_training(model, rows, device, score_mean):
+    """Evaluate fixed weights without advancing the training loader's shuffle state."""
+    model.eval()
+    predictions, scores = [], []
+    with torch.no_grad():
+        for bases, score in rows:
+            predictions.append(model(bases.to(device)).item())
+            scores.append(score)
+    return {
+        "training_mse": statistics.mean((prediction - score) ** 2 for prediction, score in zip(predictions, scores)),
+        "training_baseline_mse": statistics.mean((score - score_mean) ** 2 for score in scores),
+        "training_prediction_std": statistics.pstdev(predictions),
+        "training_prediction_min": min(predictions),
+        "training_prediction_max": max(predictions),
+    }
+
+
+def report_training(model, rows, device, score_mean, label):
+    synchronize(device)
+    start = time.perf_counter()
+    metrics = evaluate_training(model, rows, device, score_mean)
+    synchronize(device)
+    print(
+        f"{label}: training evaluation={time.perf_counter() - start:.2f}s, "
+        f"training MSE={metrics['training_mse']:.4f}, baseline MSE={metrics['training_baseline_mse']:.4f}, "
+        f"prediction std={metrics['training_prediction_std']:.8f}, "
+        f"prediction range=[{metrics['training_prediction_min']:.8f}, {metrics['training_prediction_max']:.8f}]",
+        flush=True,
+    )
+    return metrics
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -102,6 +134,9 @@ def main():
         )
         metrics = {"mse": mse, "baseline_mse": baseline_mse}
         if flare.is_evaluate():
+            metrics.update(report_training(
+                model, train_loader.dataset, device, score_mean, f"{site_name}: final global model"
+            ))
             flare.send(flare.FLModel(metrics=metrics))
             continue
         model.train()
@@ -131,6 +166,9 @@ def main():
             f"mean/genome={seconds / steps:.3f}s, online training MSE={train_mse:.4f}",
             flush=True,
         )
+        metrics.update(report_training(
+            model, train_loader.dataset, device, score_mean, f"{site_name}: round={incoming.current_round} local model"
+        ))
         flare.send(
             flare.FLModel(
                 params={key: value.detach().cpu().clone() for key, value in model.state_dict().items()},
