@@ -1,7 +1,6 @@
 """Run two clients with independently configured organization Gen repositories."""
 
 import argparse
-import os
 import shlex
 import time
 from pathlib import Path
@@ -21,21 +20,16 @@ def main():
     parser.add_argument("--num_rounds", type=positive_int, default=1)
     parser.add_argument("--num_samples", type=positive_int, default=160, help="Training genomes per client")
     parser.add_argument("--eval_samples", type=positive_int, default=40, help="Held-out genomes per client")
-    parser.add_argument("--epochs", type=positive_int, default=1)
-    parser.add_argument("--channels", type=positive_int, default=8)
-    parser.add_argument("--chunk_size", type=positive_int, default=65536)
-    parser.add_argument("--threads", type=positive_int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     args = parser.parse_args()
-    spec = model_spec(args.channels, args.chunk_size)
+    spec = model_spec()
     train_args = (
-        f" --num_samples {args.num_samples} --eval_samples {args.eval_samples} --epochs {args.epochs}"
-        f" --channels {args.channels} --chunk_size {args.chunk_size} --threads {args.threads}"
+        f" --num_samples {args.num_samples} --eval_samples {args.eval_samples}"
         f" --device {args.device}"
     )
     recipe = FedAvgRecipe(
         name="multiple-organizations",
-        model=create_model(args.channels, args.chunk_size),
+        model=create_model(),
         min_clients=2,
         num_rounds=args.num_rounds,
         train_script="client.py",

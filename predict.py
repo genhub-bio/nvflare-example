@@ -42,7 +42,7 @@ def load_model(path=DEFAULT_MODEL_PATH):
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     spec = checkpoint.get("model_spec")
     if not isinstance(spec, dict) or spec.get("version") != MODEL_VERSION:
-        raise ValueError("Checkpoint is not a full-sequence CNN; retrain with job.py")
+        raise ValueError("Checkpoint is not a current full-sequence CNN; retrain with job.py")
     if spec != model_spec(spec.get("channels"), spec.get("chunk_size")):
         raise ValueError("Unsupported model configuration")
     model = create_model(spec["channels"], spec["chunk_size"])

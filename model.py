@@ -7,7 +7,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
-MODEL_VERSION = "full-sequence-cnn-v1"
+MODEL_VERSION = "full-sequence-cnn-v2"
 
 
 class FullSequenceRegressor(nn.Module):
@@ -21,11 +21,23 @@ class FullSequenceRegressor(nn.Module):
         self.chunk_size = chunk_size
         self.encoder = nn.Sequential(
             nn.Conv1d(4, channels, 9, padding=4),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.01),
             nn.Conv1d(channels, channels, 5, padding=2),
-            nn.ReLU(),
+            nn.LeakyReLU(negative_slope=0.01),
         )
         self.output = nn.Linear(channels, 1)
+
+    @torch.no_grad()
+    def normalize_output(self, mean, scale):
+        """Convert a raw-score head to local standardized-score units before training."""
+        self.output.weight.div_(scale)
+        self.output.bias.sub_(mean).div_(scale)
+
+    @torch.no_grad()
+    def restore_output(self, mean, scale):
+        """Return the head to raw-score units before evaluation, aggregation, or saving."""
+        self.output.weight.mul_(scale)
+        self.output.bias.mul_(scale).add_(mean)
 
     def chunk_sum(self, bases, begin, end):
         one_hot = F.one_hot(bases.long(), num_classes=4).float().T.unsqueeze(0)

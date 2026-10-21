@@ -1,7 +1,9 @@
 """Federated full-genome CNN training with a small, configurable sample limit."""
 
 import argparse
+import math
 import os
+import statistics
 import time
 
 import torch
@@ -48,30 +50,44 @@ def evaluate(model, loader, device):
     return squared_error / len(loader.dataset)
 
 
+def training_score_stats(rows):
+    """Fit normalization to selected training scores only; handle constant targets."""
+    scores = [score for _, score in rows]
+    mean = statistics.mean(scores)
+    scale = statistics.pstdev(scores)
+    return mean, scale if scale > 1e-6 else 1.0
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--score_key", default="Score")
     parser.add_argument("--num_samples", type=positive_int, default=160)
     parser.add_argument("--eval_samples", type=positive_int, default=40)
-    parser.add_argument("--epochs", type=positive_int, default=1)
-    parser.add_argument("--channels", type=positive_int, default=8)
-    parser.add_argument("--chunk_size", type=positive_int, default=65536)
-    parser.add_argument("--threads", type=positive_int, default=min(4, os.cpu_count() or 1))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     args = parser.parse_args()
-    torch.set_num_threads(args.threads)
+    threads = min(4, os.cpu_count() or 1)
+    torch.set_num_threads(threads)
     device = select_device(args.device)
     flare.init()
     site_name = flare.get_site_name()
     start = time.perf_counter()
     train_loader, validation_loader = create_loaders(args.repo, args.num_samples, args.eval_samples, args.score_key)
+    score_mean, score_scale = training_score_stats(train_loader.dataset)
+    baseline_mse = sum((score - score_mean) ** 2 for _, score in validation_loader.dataset) / len(
+        validation_loader.dataset
+    )
     print(
         f"{site_name}: loaded {len(train_loader.dataset)} training and {len(validation_loader.dataset)} "
-        f"evaluation genomes in {time.perf_counter() - start:.2f}s; device={device}, threads={args.threads}",
+        f"evaluation genomes in {time.perf_counter() - start:.2f}s; device={device}, threads={threads}",
         flush=True,
     )
-    model = create_model(args.channels, args.chunk_size).to(device)
+    print(
+        f"{site_name}: training score mean={score_mean:.4f}, scale={score_scale:.4f}; "
+        f"held-out training-mean baseline MSE={baseline_mse:.4f}",
+        flush=True,
+    )
+    model = create_model().to(device)
     while flare.is_running():
         incoming = flare.receive()
         model.load_state_dict(incoming.params)
@@ -79,33 +95,46 @@ def main():
         start = time.perf_counter()
         mse = evaluate(model, validation_loader, device)
         synchronize(device)
-        print(f"{site_name}: evaluation={time.perf_counter() - start:.2f}s, MSE={mse:.4f}", flush=True)
+        print(
+            f"{site_name}: evaluation={time.perf_counter() - start:.2f}s, MSE={mse:.4f}, "
+            f"baseline MSE={baseline_mse:.4f}, improvement={baseline_mse - mse:.4f}",
+            flush=True,
+        )
+        metrics = {"mse": mse, "baseline_mse": baseline_mse}
         if flare.is_evaluate():
-            flare.send(flare.FLModel(metrics={"mse": mse}))
+            flare.send(flare.FLModel(metrics=metrics))
             continue
         model.train()
+        model.normalize_output(score_mean, score_scale)
         optimizer = torch.optim.SGD(model.parameters(), lr=0.001)
         synchronize(device)
         start = time.perf_counter()
-        for _ in range(args.epochs):
-            for bases, score in train_loader:
-                optimizer.zero_grad(set_to_none=True)
-                target = torch.tensor(score, dtype=torch.float32, device=device)
-                loss = torch.nn.functional.mse_loss(model(bases.to(device)), target)
-                loss.backward()
-                optimizer.step()
+        normalized_squared_error = 0.0
+        for bases, score in train_loader:
+            optimizer.zero_grad(set_to_none=True)
+            target = torch.tensor((score - score_mean) / score_scale, dtype=torch.float32, device=device)
+            loss = torch.nn.functional.mse_loss(model(bases.to(device)), target)
+            if not torch.isfinite(loss).item():
+                raise ValueError("Nonfinite training loss")
+            normalized_squared_error += loss.detach().item()
+            loss.backward()
+            optimizer.step()
+        model.restore_output(score_mean, score_scale)
         synchronize(device)
         seconds = time.perf_counter() - start
-        steps = args.epochs * len(train_loader)
+        steps = len(train_loader)
+        train_mse = normalized_squared_error / steps * score_scale ** 2
+        if not math.isfinite(train_mse):
+            raise ValueError("Nonfinite training MSE")
         print(
             f"{site_name}: round={incoming.current_round}, training={seconds:.2f}s, "
-            f"mean/genome={seconds / steps:.3f}s",
+            f"mean/genome={seconds / steps:.3f}s, online training MSE={train_mse:.4f}",
             flush=True,
         )
         flare.send(
             flare.FLModel(
                 params={key: value.detach().cpu().clone() for key, value in model.state_dict().items()},
-                metrics={"mse": mse},
+                metrics=metrics,
                 meta={"NUM_STEPS_CURRENT_ROUND": steps},
             )
         )

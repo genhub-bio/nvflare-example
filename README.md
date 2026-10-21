@@ -22,15 +22,14 @@ genomes total), one local epoch, and one federated round. `site-1` uses `organiz
 To reproduce the CPU benchmark explicitly:
 
 ```bash
-python job.py --num_samples 160 --eval_samples 40 --epochs 1 --num_rounds 1 --device cpu
+python job.py --num_samples 160 --eval_samples 40 --num_rounds 1 --device cpu
 ```
 
 Each client prints loading/encoding time, evaluation time, training time per
 round, and average training time per genome. The launcher also prints federated
 wall time, including startup, communication, aggregation, and final evaluation.
 CUDA/MPS work is synchronized before recording times. The automatic device
-selection prefers CUDA, then Apple MPS, then CPU. `--threads` defaults to at most
-four CPU threads per client.
+selection prefers CUDA, then Apple MPS, then CPU. Each client uses at most four CPU threads.
 
 Sample counts are **per client** and must fit within that client's training and
 evaluation splits. Each supplied organization has 200 scored samples: the
@@ -47,17 +46,13 @@ the held-out split. Each selected sample must have exactly one graph and one seq
 client accepts `--score_key` to use another metadata field.
 
 Every A/C/G/T base is encoded and used. Training generates no GFA files, alignments, reference-relative variants, or
-k-mer vectors. The CNN has two stride-one convolutional layers (kernel sizes 9 and 5, default 8 channels), ReLU
+k-mer vectors. The CNN has two stride-one convolutional layers (kernel sizes 9 and 5, default 8 channels), LeakyReLU
 activations, global average pooling, and a regression output. There is one loss and one optimizer step per complete
 genome, with batch size 1.
 
 Overlapping chunks preserve convolution context at their boundaries. Activation checkpointing recomputes chunk
-activations during backward to bound memory; chunk outputs are combined before computing the genome's score. The default
-chunk size is 65,536 bases. Increase model width or change memory usage with:
-
-```bash
-python job.py --channels 32 --chunk_size 131072
-```
+activations during backward to bound memory; chunk outputs are combined before computing the genome's score. The
+chunk size is 65,536 bases, with eight channels and one local training epoch per round.
 
 The default model has 633 parameters. Its cost includes processing every base, even though its checkpoint is small. This
 is an example CNN: global pooling loses absolute positions and the model has a short local receptive field.  Timing
@@ -66,10 +61,20 @@ measures this architecture, not a large genomic transformer.
 Clients report mean squared error (MSE) on the incoming global model, then train locally and send parameters for FedAvg
 aggregation. Lower MSE is better. A final evaluation measures the aggregated model on each client's held-out genomes.
 
+Each client standardizes targets using the mean and population standard deviation of its selected training scores
+only (a scale of 1 is used for constant targets). The final layer is converted into these local units before training
+and back to original score units before evaluation and federated aggregation. Normalization statistics stay local;
+saved models predict in original score units. LeakyReLU keeps gradients flowing through negative activations.
+
+Evaluation logs include a baseline MSE from always predicting that client's training-score mean. Positive
+`improvement` means the model beats this baseline on held-out data. The online training MSE summarizes predictions
+made during updates, rather than a separate evaluation of the final model.
+
 ## Prediction
 
 A successful run saves `models/global_model.pt`, including the CNN weights and architecture configuration. It replaces
-the previous checkpoint. Earlier k-mer and variant checkpoints are incompatible; rerun `job.py` to produce a CNN model.
+the previous checkpoint. Earlier checkpoints, including the ReLU CNN (v1), are incompatible; rerun `job.py` to produce
+a LeakyReLU CNN (v2) model. This change prevents silently interpreting old weights with the new activation function.
 
 
 ## Files
