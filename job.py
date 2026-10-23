@@ -2,7 +2,9 @@
 
 import argparse
 import shlex
+import shutil
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 import torch
@@ -23,54 +25,57 @@ def main():
     parser.add_argument("--eval_samples", type=positive_int, default=40, help="Held-out genomes per client")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     args = parser.parse_args()
-    args.org_a_repo = clone_repository(
-        "https://staging.genhub.bio/api/repos/organization-a/nvflare-data", args.org_a_repo
-    )
-    args.org_b_repo = clone_repository(
-        "https://staging.genhub.bio/api/repos/organization-b/nvflare-data-b", args.org_b_repo
-    )
-    spec = model_spec()
-    train_args = (
-        f" --num_samples {args.num_samples} --eval_samples {args.eval_samples}"
-        f" --device {args.device}"
-    )
-    recipe = FedAvgRecipe(
-        name="multiple-organizations",
-        model=create_model(),
-        min_clients=2,
-        num_rounds=args.num_rounds,
-        train_script="client.py",
-        key_metric="mse",
-        key_metric_mode="min",
-    )
-    set_per_site_config(
-        recipe,
-        {
-            # Use strings for compatibility with installed NVFlare releases.
-            "site-1": {"train_args": f"--repo {shlex.quote(str(args.org_a_repo.expanduser().resolve()))}{train_args}"},
-            "site-2": {"train_args": f"--repo {shlex.quote(str(args.org_b_repo.expanduser().resolve()))}{train_args}"},
-        },
-    )
-    add_final_global_evaluation(recipe)
-    start = time.perf_counter()
-    run = recipe.execute(SimEnv(clients=["site-1", "site-2"]))
-    result = run.get_result(clean_up=False)
-    print(f"Federated run wall time: {time.perf_counter() - start:.2f}s", flush=True)
-    if result is None:
-        raise RuntimeError("Simulation did not return a result workspace.")
-    checkpoint = Path(result) / "server" / "simulate_job" / "app_server" / "FL_global_model.pt"
-    output = Path(__file__).resolve().parent / "models" / "global_model.pt"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    saved["model_spec"] = spec
-    temporary = output.with_suffix(".part")
-    try:
-        torch.save(saved, temporary)
-        temporary.replace(output)
-    finally:
-        temporary.unlink(missing_ok=True)
-    print("Results:", result)
-    print("Saved model:", output)
+    with ExitStack() as repositories:
+        args.org_a_repo = clone_repository(
+            "https://staging.genhub.bio/api/repos/organization-a/nvflare-data", args.org_a_repo
+        )
+        repositories.callback(shutil.rmtree, args.org_a_repo)
+        args.org_b_repo = clone_repository(
+            "https://staging.genhub.bio/api/repos/organization-b/nvflare-data-b", args.org_b_repo
+        )
+        repositories.callback(shutil.rmtree, args.org_b_repo)
+        spec = model_spec()
+        train_args = (
+            f" --num_samples {args.num_samples} --eval_samples {args.eval_samples}"
+            f" --device {args.device}"
+        )
+        recipe = FedAvgRecipe(
+            name="multiple-organizations",
+            model=create_model(),
+            min_clients=2,
+            num_rounds=args.num_rounds,
+            train_script="client.py",
+            key_metric="mse",
+            key_metric_mode="min",
+        )
+        set_per_site_config(
+            recipe,
+            {
+                # Use strings for compatibility with installed NVFlare releases.
+                "site-1": {"train_args": f"--repo {shlex.quote(str(args.org_a_repo.expanduser().resolve()))}{train_args}"},
+                "site-2": {"train_args": f"--repo {shlex.quote(str(args.org_b_repo.expanduser().resolve()))}{train_args}"},
+            },
+        )
+        add_final_global_evaluation(recipe)
+        start = time.perf_counter()
+        run = recipe.execute(SimEnv(clients=["site-1", "site-2"]))
+        result = run.get_result(clean_up=False)
+        print(f"Federated run wall time: {time.perf_counter() - start:.2f}s", flush=True)
+        if result is None:
+            raise RuntimeError("Simulation did not return a result workspace.")
+        checkpoint = Path(result) / "server" / "simulate_job" / "app_server" / "FL_global_model.pt"
+        output = Path(__file__).resolve().parent / "models" / "global_model.pt"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        saved["model_spec"] = spec
+        temporary = output.with_suffix(".part")
+        try:
+            torch.save(saved, temporary)
+            temporary.replace(output)
+        finally:
+            temporary.unlink(missing_ok=True)
+        print("Results:", result)
+        print("Saved model:", output)
 
 
 if __name__ == "__main__":
