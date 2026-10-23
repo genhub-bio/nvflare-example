@@ -15,7 +15,10 @@ python job.py
 
 The defaults run **160 training genomes and 40 held-out evaluation genomes per client** (320 training and 80 evaluation
 genomes total), one local epoch, and one federated round. `site-1` uses `organization-a`, and `site-2` uses
-`organization-b`. Each must contain an existing gen repository with its sequence assets.
+`organization-b`. Before training, Python clones
+`https://staging.genhub.bio/api/repos/organization-a/nvflare-data` into `organization-a` and
+`https://staging.genhub.bio/api/repos/organization-b/nvflare-data-b` into `organization-b` using `gen.clone`.
+Existing local Gen repositories are reused. Use `--org_a_repo` and `--org_b_repo` to choose other local paths.
 
 ## Benchmarking
 
