@@ -5,6 +5,16 @@ import random
 from pathlib import Path
 
 
+def clone_repository(url, path):
+    """Clone a remote repository unless a local Gen repository already exists."""
+    import gen
+
+    path = Path(path).expanduser().resolve()
+    if not (path / ".gen" / "gen.db").is_file():
+        gen.clone(url, path=path)
+    return path
+
+
 def open_repository(path):
     """Open an existing repository; do not silently initialize a missing one."""
     import gen

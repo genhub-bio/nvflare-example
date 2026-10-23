@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 from client import positive_int
+from data import clone_repository
 from model import create_model, model_spec
 
 from nvflare.app_opt.pt.recipes.fedavg import FedAvgRecipe
@@ -22,6 +23,12 @@ def main():
     parser.add_argument("--eval_samples", type=positive_int, default=40, help="Held-out genomes per client")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     args = parser.parse_args()
+    args.org_a_repo = clone_repository(
+        "https://staging.genhub.bio/api/repos/organization-a/nvflare-data", args.org_a_repo
+    )
+    args.org_b_repo = clone_repository(
+        "https://staging.genhub.bio/api/repos/organization-b/nvflare-data-b", args.org_b_repo
+    )
     spec = model_spec()
     train_args = (
         f" --num_samples {args.num_samples} --eval_samples {args.eval_samples}"
