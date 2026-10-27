@@ -27,11 +27,11 @@ def main():
     args = parser.parse_args()
     with ExitStack() as repositories:
         args.org_a_repo = clone_repository(
-            "https://staging.genhub.bio/api/repos/organization-a/nvflare-data", args.org_a_repo
+            "https://www.genhub.bio/api/repos/organization-a/nvflare-data", args.org_a_repo
         )
         repositories.callback(shutil.rmtree, args.org_a_repo)
         args.org_b_repo = clone_repository(
-            "https://staging.genhub.bio/api/repos/organization-b/nvflare-data-b", args.org_b_repo
+            "https://www.genhub.bio/api/repos/organization-b/nvflare-data", args.org_b_repo
         )
         repositories.callback(shutil.rmtree, args.org_b_repo)
         spec = model_spec()
