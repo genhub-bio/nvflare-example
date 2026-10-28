@@ -49,16 +49,9 @@ def sample_rows(samples, score_key="Score"):
     """Yield one (sequence, score) per sample, keeping only one genome in memory."""
     for sample in samples:
         score = sample_score(sample, score_key)
-        graphs = sample.sequence_graphs
-        if len(graphs) != 1:
-            raise ValueError(f"Sample {sample.name}: expected exactly one sequence graph")
-        sequences = graphs[0].all_sequences()
-        if len(sequences) != 1:
-            raise ValueError(f"Sample {sample.name}: expected exactly one sequence")
-        sequence = str(sequences[0])
-        if not sequence:
-            raise ValueError(f"Sample {sample.name}: sequence must not be empty")
-        yield sequence, score
+        [sequence_graph] = sample.sequence_graphs
+        [sequence] = sequence_graph.all_sequences()
+        yield str(sequence), score
 
 
 def dna_sequence(sequence):
